@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Fractal Generator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        #fractalCanvas { width: 100%; height: 100vh; }
+        #controls { position: absolute; top: 10px; left: 10px; background: rgba(255,255,255,0.7); padding: 10px; border-radius: 5px; }
+        #rulesList { margin-top: 10px; max-height: 300px; overflow-y: auto; }
+        .rule { background: rgba(200,200,200,0.7); padding: 5px; margin-bottom: 5px; border-radius: 3px; }
+        #debug { position: absolute; bottom: 10px; left: 10px; background: rgba(255,255,255,0.7); padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div id="fractalCanvas"></div>
+    <div id="controls">
+        <button id="addRuleBtn">Add Rule</button>
+        <button id="generateBtn">Generate Fractal</button>
+        <div id="rulesList"></div>
+    </div>
+    <div id="debug"></div>
+
+    <script>
+        let scene, camera, renderer, points, controls;
+        let rules = [];
+        let iterations = 100000;
+        let gui;
+
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.getElementById('fractalCanvas').appendChild(renderer.domElement);
+
+            camera.position.z = 5;
+
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Add orbit controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.25;
+            controls.screenSpacePanning = false;
+            controls.maxDistance = 500;
+
+            // Add axes helper
+            const axesHelper = new THREE.AxesHelper(5);
+            scene.add(axesHelper);
+
+            // Add ambient light
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            // Add directional light
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function initGUI() {
+            gui = new dat.GUI();
+            const fractalFolder = gui.addFolder('Fractal Settings');
+            fractalFolder.add(window, 'iterations', 1000, 1000000).step(1000).onChange(generateFractal);
+            fractalFolder.open();
+        }
+
+        function addRule() {
+            const rule = {
+                a: Math.random() * 2 - 1,
+                b: Math.random() * 2 - 1,
+                c: Math.random() * 2 - 1,
+                d: Math.random() * 2 - 1,
+                e: Math.random() * 2 - 1,
+                f: Math.random() * 2 - 1,
+                g: Math.random() * 2 - 1,
+                h: Math.random() * 2 - 1,
+                i: Math.random() * 2 - 1,
+                j: Math.random() * 2 - 1,
+                k: Math.random() * 2 - 1,
+                l: Math.random() * 2 - 1,
+                p: 1,
+                color: '#' + Math.floor(Math.random()*16777215).toString(16)
+            };
+            rules.push(rule);
+            updateRulesList();
+            generateFractal();
+        }
+
+        function updateRulesList() {
+            const rulesList = document.getElementById('rulesList');
+            rulesList.innerHTML = '';
+            rules.forEach((rule, index) => {
+                const ruleElement = document.createElement('div');
+                ruleElement.className = 'rule';
+                ruleElement.innerHTML = `
+                    <h4>Rule ${index + 1}</h4>
+                    ${['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'].map(param => 
+                        `<label>${param}: <input type="number" step="0.1" value="${rule[param].toFixed(2)}" onchange="updateRuleParam(${index}, '${param}', this.value)"></label>`
+                    ).join('')}
+                    <label>p: <input type="number" step="0.1" min="0" max="1" value="${rule.p}" onchange="updateRuleParam(${index}, 'p', this.value)"></label>
+                    <input type="color" value="${rule.color}" onchange="updateRuleColor(${index}, this.value)">
+                    <button onclick="removeRule(${index})">Remove</button>
+                `;
+                rulesList.appendChild(ruleElement);
+            });
+        }
+
+        function updateRuleParam(index, param, value) {
+            rules[index][param] = parseFloat(value);
+            generateFractal();
+        }
+
+        function updateRuleColor(index, color) {
+            rules[index].color = color;
+            generateFractal();
+        }
+
+        function removeRule(index) {
+            rules.splice(index, 1);
+            updateRulesList();
+            generateFractal();
+        }
+
+        function generateFractal() {
+            console.log("Generating fractal...");
+            if (scene.children.length > 3) {  // Keep axes helper, ambient light, and directional light
+                scene.remove(scene.children[3]);
+            }
+
+            if (rules.length === 0) {
+                console.log("No rules defined. Add at least one rule.");
+                return;
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(iterations * 3);
+            const colors = new Float32Array(iterations * 3);
+
+            let x = 0, y = 0, z = 0;
+            let minX = 0, maxX = 0, minY = 0, maxY = 0, minZ = 0, maxZ = 0;
+
+            for (let i = 0; i < iterations; i++) {
+                const r = Math.random();
+                let cumulativeProbability = 0;
+                let selectedRule;
+
+                for (const rule of rules) {
+                    cumulativeProbability += rule.p;
+                    if (r <= cumulativeProbability) {
+                        selectedRule = rule;
+                        break;
+                    }
+                }
+
+                if (!selectedRule) {
+                    selectedRule = rules[rules.length - 1];
+                }
+
+                const newX = selectedRule.a * x + selectedRule.b * y + selectedRule.c * z + selectedRule.j;
+                const newY = selectedRule.d * x + selectedRule.e * y + selectedRule.f * z + selectedRule.k;
+                const newZ = selectedRule.g * x + selectedRule.h * y + selectedRule.i * z + selectedRule.l;
+
+                x = newX; y = newY; z = newZ;
+
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
+
+                minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+                minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+
+                const color = new THREE.Color(selectedRule.color);
+                colors[i * 3] = color.r;
+                colors[i * 3 + 1] = color.g;
+                colors[i * 3 + 2] = color.b;
+            }
+
+            console.log("Bounding box:", {minX, maxX, minY, maxY, minZ, maxZ});
+
+            const scale = 2 / Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+            for (let i = 0; i < iterations * 3; i += 3) {
+                positions[i] = (positions[i] - (minX + maxX) / 2) * scale;
+                positions[i + 1] = (positions[i + 1] - (minY + maxY) / 2) * scale;
+                positions[i + 2] = (positions[i + 2] - (minZ + maxZ) / 2) * scale;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({ size: 0.05, vertexColors: true });
+            points = new THREE.Points(geometry, material);
+            scene.add(points);
+
+            // Add bounding box
+            const boxGeometry = new THREE.BoxGeometry(2, 2, 2);
+            const edges = new THREE.EdgesGeometry(boxGeometry);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff }));
+            scene.add(line);
+
+            console.log("Fractal generated with", iterations, "points");
+            updateDebugInfo();
+
+            // Center camera on the fractal
+            camera.position.set(0, 0, 3);
+            if (controls) {
+                controls.target.set(0, 0, 0);
+                controls.update();
+            }
+        }
+
+        function updateDebugInfo() {
+            const debugElement = document.getElementById('debug');
+            debugElement.innerHTML = `
+                <h3>Debug Info</h3>
+                <p>Number of rules: ${rules.length}</p>
+                <p>Number of iterations: ${iterations}</p>
+                <p>Camera position: (${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)})</p>
+                <p>Number of points: ${points ? points.geometry.attributes.position.count : 0}</p>
+            `;
+        }
+
+        function logCameraInfo() {
+            console.log("Camera position:", camera.position);
+            console.log("Camera rotation:", camera.rotation);
+            console.log("Controls target:", controls.target);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls) {
+                controls.update();
+            }
+            renderer.render(scene, camera);
+            updateDebugInfo();
+            logCameraInfo();
+        }
+
+        function init() {
+            initThreeJS();
+            initGUI();
+            addRule(); // Add an initial rule
+            updateRulesList();
+            generateFractal();
+            animate();
+        }
+
+        document.getElementById('addRuleBtn').addEventListener('click', addRule);
+        document.getElementById('generateBtn').addEventListener('click', generateFractal);
+
+        // Initialize everything when the window loads
+        window.onload = init;
+    </script>
+</body>
+</html>
